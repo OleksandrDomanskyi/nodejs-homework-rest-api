@@ -3,7 +3,9 @@ const Joi = require("joi")
 
 const Contact = require('../../models/contact')
 
-const {createError} = require("../../helpers")
+const { createError } = require("../../helpers")
+
+const {authorize} = require('../../middlewares')
 
 const router = express.Router()
 
@@ -17,10 +19,24 @@ const contactFavoriteSchema = Joi.object({
   favorite: Joi.boolean().required()
 })
 
-router.get('/', async (req, res, next) => {
+router.get('/', authorize, async (req, res, next) => {
   try {
-    const result = await Contact.find();
-    res.json(result)
+    const { page = 1, limit = 20, favorite = false } = req.query;
+    const { _id: owner } = req.user;
+    const total = await Contact.countDocuments({ owner });
+    const maxPage = Math.ceil(total / limit);
+
+    const resPage = page > maxPage ? maxPage : page;
+    const query = favorite ? { favorite, owner } : { owner };
+    if (page < 1 || limit < 1) {
+      throw createError(400, 'Invalid page or limit');
+    }
+
+    const result = await Contact.find(query, '-createdAt -updatedAt')
+      .populate('owner', 'email')
+      .limit(limit)
+      .skip((resPage - 1) * limit)
+    res.json({ contacts: result, total, page: resPage, limit })
   } catch (error) {
     next(error);
     // res.status(500).json({
@@ -29,7 +45,7 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-router.get('/:contactId', async (req, res, next) => {
+router.get('/:contactId', authorize, async (req, res, next) => {
   try {
     const { contactId } = req.params;
     const result = await Contact.findById(contactId);
@@ -46,13 +62,14 @@ router.get('/:contactId', async (req, res, next) => {
   }
 })
 
-router.post('/', async (req, res, next) => {
+router.post('/', authorize, async (req, res, next) => {
   try {
+    const { _id: owner } = req.user;
     const { error } = contactSchema.validate(req.body);
     if (error) {
       throw createError(400, error.message)
     }
-    const result = await Contact.create(req.body);
+    const result = await Contact.create({...req.body, owner});
     res.status(201).json(result);
   } catch (error) {
     next(error);
