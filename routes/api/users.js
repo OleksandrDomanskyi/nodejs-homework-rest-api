@@ -2,12 +2,17 @@ const express = require('express');
 const Joi = require('joi');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
+const gravatar = require('gravatar');
+const path = require('path');
+const fs = require('fs/promises');
+const Jimp = require('jimp')
 
 const User = require('../../models/user');
 
 const { createError } = require("../../helpers")
 
-const { authorize } = require('../../middlewares')
+const { authorize, upload } = require('../../middlewares')
 
 const router = express.Router();
 
@@ -46,7 +51,8 @@ router.post('/signup', async (req, res, next) => {
             throw createError(409, 'Email in use')
         }
         const hashPassword = await bcrypt.hash(password, 10);
-        const result = await User.create({ email, password: hashPassword, subscription });
+        const avatarURL = gravatar.url(email);
+        const result = await User.create({ email, password: hashPassword, subscription, avatarURL });
         res.status(201).json({
             email: result.email,
             subscription: result.subscription,
@@ -64,7 +70,7 @@ router.post('/login', async (req, res, next) => {
         }
         const { email, password } = req.body;
         // const user = await User.findOne({ email });
-        // const passwordCompare = await bcrypt.compare(password, user.password);
+        // const passwordCompare = await bcrypt.compare(password, user?.password);
         // if (!user || !passwordCompare) {
         //     throw createError(401, 'Email or password is wrong')
         // }
@@ -121,6 +127,31 @@ router.patch('/subscription', authorize, async (req, res, next) => {
         }
         res.json(result)
     } catch (error) {
+        next(error)
+    }
+})
+
+const avatarDir = path.join(__dirname, '../../', 'public', 'avatars')
+
+router.patch('/avatars', authorize, upload.single('avatar'), async (req, res, next) => {
+    try {
+        const {_id} = req.user
+        const { path: tempDir, originalname } = req.file
+        const [extention] = originalname.split('.').reverse()
+        const newAvatar = `${_id}.${extention}`
+        const uploadDir = path.join(avatarDir, newAvatar)
+        await fs.rename(tempDir, uploadDir)
+        const avatarURL = path.join('avatars', newAvatar)
+        Jimp.read(uploadDir, (err, lenna) => {
+            if (err) throw err;
+            lenna
+                .resize(250, 250)
+                .write(uploadDir)
+        })
+        await User.findByIdAndUpdate(req.user._id, { avatarURL })
+        res.json({avatarURL})
+    } catch (error) {
+        await fs.unlink(req.file.path)
         next(error)
     }
 })
