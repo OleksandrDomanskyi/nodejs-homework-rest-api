@@ -1,126 +1,17 @@
-const express = require('express')
-const Joi = require("joi")
+const express = require('express');
 
-const Contact = require('../../models/contact')
+const { authorize, validationBody, isValidId } = require('../../middlewares');
+const ctrl = require('../../controllers/contacts');
+const { ctrlWrapper } = require('../../helpers');
+const { schemas } = require('../../models/contact');
 
-const { createError } = require("../../helpers")
+const router = express.Router();
 
-const {authorize} = require('../../middlewares')
+router.get('/', authorize, ctrlWrapper(ctrl.getAll));
+router.get('/:contactId', authorize, isValidId, ctrlWrapper(ctrl.getById));
+router.post('/', authorize, validationBody(schemas.add), ctrlWrapper(ctrl.add));
+router.delete('/:contactId', authorize, isValidId, ctrlWrapper(ctrl.removeById));
+router.put('/:contactId', authorize, isValidId, validationBody(schemas.add), ctrlWrapper(ctrl.updateById));
+router.patch('/:contactId/favorite', authorize, isValidId, validationBody(schemas.updateFavorite), ctrlWrapper(ctrl.updateFavorite));
 
-const router = express.Router()
-
-const contactSchema = Joi.object({
-  name: Joi.string().required(),
-  email: Joi.string().required(),
-  phone: Joi.string().required(),
-  favorite: Joi.boolean(),
-})
-const contactFavoriteSchema = Joi.object({
-  favorite: Joi.boolean().required()
-})
-
-router.get('/', authorize, async (req, res, next) => {
-  try {
-    const { page = 1, limit = 20, favorite = false } = req.query;
-    const { _id: owner } = req.user;
-    const total = await Contact.countDocuments({ owner });
-    const maxPage = Math.ceil(total / limit);
-
-    const resPage = page > maxPage ? maxPage : page;
-    const query = favorite ? { favorite, owner } : { owner };
-    if (page < 1 || limit < 1) {
-      throw createError(400, 'Invalid page or limit');
-    }
-
-    const result = await Contact.find(query, '-createdAt -updatedAt')
-      .populate('owner', 'email')
-      .limit(limit)
-      .skip((resPage - 1) * limit)
-    res.json({ contacts: result, total, page: resPage, limit })
-  } catch (error) {
-    next(error);
-    // res.status(500).json({
-    //   message: "Server error"
-    // })
-  }
-})
-
-router.get('/:contactId', authorize, async (req, res, next) => {
-  try {
-    const { contactId } = req.params;
-    const result = await Contact.findById(contactId);
-    if (!result) {
-      throw createError(404, "Not found")
-      // res.status(404).json({
-      //   message: "Not found"
-      // });
-      // return;
-    }
-    res.json(result)
-  } catch (error) {
-    next(error);
-  }
-})
-
-router.post('/', authorize, async (req, res, next) => {
-  try {
-    const { _id: owner } = req.user;
-    const { error } = contactSchema.validate(req.body);
-    if (error) {
-      throw createError(400, error.message)
-    }
-    const result = await Contact.create({...req.body, owner});
-    res.status(201).json(result);
-  } catch (error) {
-    next(error);
-  }
-})
-
-router.delete('/:contactId', async (req, res, next) => {
-  try {
-    const { contactId } = req.params;
-    const result = await Contact.findByIdAndRemove(contactId);
-    if (!result) {
-      throw createError(404, "Not found")
-    }
-    res.json({message: "contact deleted"})
-  } catch (error) {
-    next(error);
-  }
-})
-
-router.put('/:contactId', async (req, res, next) => {
-  try {
-    const { error } = contactSchema.validate(req.body);
-    if (error) {
-      throw createError(400, error.message)
-    }
-    const { contactId } = req.params;
-    const result = await Contact.findByIdAndUpdate(contactId, req.body, {new: true});
-    if (!result) {
-      throw createError(404, "Not found")
-    }
-    res.json(result)
-  } catch (error) {
-    next(error);
-  }
-})
-
-router.patch('/:contactId/favorite', async (req, res, next) => {
-  try {
-    const { error } = contactFavoriteSchema.validate(req.body);
-    if (error) {
-      throw createError(400, "missing field favorite")
-    }
-    const { contactId } = req.params;
-    const result = await Contact.findByIdAndUpdate(contactId, req.body, {new: true});
-    if (!result) {
-      throw createError(404, "Not found")
-    }
-    res.json(result)
-  } catch (error) {
-    next(error);
-  }
-})
-
-module.exports = router
+module.exports = router;
